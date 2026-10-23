@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Briefcase, Plus, Send, Sparkles, DollarSign, Calendar, CheckCircle } from "lucide-react";
+import Link from "next/link";
+import { Briefcase, Plus, Send, Sparkles, DollarSign, Calendar, CheckCircle, ArrowRight } from "lucide-react";
 
 interface Job {
   id: string;
@@ -122,7 +123,7 @@ export default function ProjectsPage() {
             Project & Service Marketplace
           </h1>
           <p className="text-xs sm:text-sm text-slate-400">
-            Publish technical requirements or bid with deterministic heuristic proposal scoring (FR-11).
+            Publish technical requirements, inspect applicant proposals, and award contracts with heuristic scoring (FR-11).
           </p>
         </div>
 
@@ -152,7 +153,11 @@ export default function ProjectsPage() {
                   </span>
                 </div>
 
-                <h3 className="text-lg font-bold text-white">{job.title}</h3>
+                <Link href={`/projects/${job.id}`} className="group">
+                  <h3 className="text-lg font-bold text-white group-hover:text-indigo-300 transition-colors">
+                    {job.title}
+                  </h3>
+                </Link>
                 <p className="text-xs text-slate-300 mt-2 line-clamp-3 leading-relaxed">
                   {job.description}
                 </p>
@@ -168,20 +173,29 @@ export default function ProjectsPage() {
                 )}
               </div>
 
-              <div className="pt-4 border-t border-slate-800 flex items-center justify-between text-xs">
-                <span className="text-slate-400">
+              <div className="pt-4 border-t border-slate-800 flex items-center justify-between text-xs gap-2">
+                <span className="text-slate-400 truncate">
                   By <strong className="text-slate-200">{job.client.name}</strong> • {job.proposals.length} Bids
                 </span>
-                <button
-                  onClick={() => {
-                    setSelectedJob(job);
-                    setBidAmount(job.budget.toString());
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 font-semibold transition-colors flex items-center gap-1.5"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  Submit Bid
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/projects/${job.id}`}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition-colors flex items-center gap-1"
+                  >
+                    View Bids ({job.proposals.length}) <ArrowRight className="w-3 h-3" />
+                  </Link>
+                  <button
+                    onClick={() => {
+                      setSelectedJob(job);
+                      setBidAmount(job.budget.toString());
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Bid
+                  </button>
+                </div>
               </div>
             </div>
           ))}

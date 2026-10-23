@@ -28,12 +28,11 @@ export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [session, setSession] = useState<UserSession | null>(null);
-  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const [loadingPersona, setLoadingPersona] = useState(false);
 
-  // Fetch session
   const fetchSession = async () => {
     try {
       const res = await fetch("/api/auth/session");
@@ -45,6 +44,13 @@ export default function Navbar() {
           email: data.user.email,
           role: data.user.role,
         });
+
+        // Also fetch user wallet
+        const wRes = await fetch("/api/wallet");
+        const wData = await wRes.json();
+        if (typeof wData.walletBalance === "number") {
+          setWalletBalance(wData.walletBalance);
+        }
       }
     } catch (e) {
       console.error("Session fetch error:", e);
@@ -78,6 +84,7 @@ export default function Navbar() {
       if (data.success) {
         setSession(data.user);
         setSwitcherOpen(false);
+        fetchSession();
         router.refresh();
       }
     } catch (e) {
@@ -91,6 +98,7 @@ export default function Navbar() {
     { label: "Marketplace", href: "/projects", icon: Briefcase },
     { label: "Contracts", href: "/contracts", icon: FileText },
     { label: "Disputes & Merkle", href: "/disputes", icon: Scale },
+    { label: "Escrow Wallet", href: "/wallet", icon: Wallet },
     { label: "Chained Audit", href: "/audit", icon: Activity },
     { label: "Engine Showcase", href: "/engines", icon: Layers },
   ];
@@ -123,7 +131,7 @@ export default function Navbar() {
         </div>
 
         {/* Navigation Links */}
-        <div className="hidden md:flex items-center gap-1">
+        <div className="hidden lg:flex items-center gap-1">
           {navLinks.map((link) => {
             const Icon = link.icon;
             const active = pathname === link.href;
@@ -144,8 +152,19 @@ export default function Navbar() {
           })}
         </div>
 
-        {/* Persona Switcher & Controls */}
+        {/* Right Controls: Wallet Chip + Persona Switcher */}
         <div className="flex items-center gap-2.5">
+          {/* Wallet Balance Pill */}
+          {walletBalance !== null && (
+            <Link
+              href="/wallet"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs font-mono font-bold text-white hover:border-slate-500 transition-colors"
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>${walletBalance.toLocaleString(undefined, { minimumFractionDigits: 0 })}</span>
+            </Link>
+          )}
+
           {/* Theme Toggle */}
           <button
             onClick={toggleTheme}

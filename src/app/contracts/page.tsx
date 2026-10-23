@@ -9,9 +9,12 @@ import {
   AlertTriangle,
   Upload,
   Clock,
-  ArrowRight,
   ExternalLink,
-  ShieldAlert,
+  MessageSquare,
+  Send,
+  Star,
+  RotateCcw,
+  Scale,
 } from "lucide-react";
 
 interface Milestone {
@@ -23,6 +26,7 @@ interface Milestone {
   status: "LOCKED" | "FUNDED" | "IN_DEVELOPMENT" | "SUBMITTED" | "APPROVED" | "DISPUTED" | "REFUNDED";
   deliverableUrl?: string;
   deliverableHash?: string;
+  revisionNotes?: string;
   reviewDeadline?: string;
 }
 
@@ -31,9 +35,17 @@ interface Contract {
   title: string;
   totalAmount: number;
   status: string;
-  client: { name: string; email: string };
-  freelancer: { name: string; email: string };
+  client: { id: string; name: string; email: string };
+  freelancer: { id: string; name: string; email: string };
   milestones: Milestone[];
+}
+
+interface ChatMessage {
+  id: string;
+  senderId: string;
+  content: string;
+  createdAt: string;
+  sender: { name: string; role: string };
 }
 
 export default function ContractsPage() {
@@ -41,10 +53,25 @@ export default function ContractsPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Deliverable modal
+  // Deliverable submit modal
   const [submitMilestone, setSubmitMilestone] = useState<{ contractId: string; milestone: Milestone } | null>(null);
   const [deliverableUrl, setDeliverableUrl] = useState("");
   const [commitSha, setCommitSha] = useState("8f9e12a");
+
+  // In-Contract Chat Drawer
+  const [chatContract, setChatContract] = useState<Contract | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [messagesLoading, setMessagesLoading] = useState(false);
+
+  // Revision Modal
+  const [revisionMilestone, setRevisionMilestone] = useState<{ contractId: string; milestoneId: string } | null>(null);
+  const [revisionNotes, setRevisionNotes] = useState("");
+
+  // Review Rating Modal
+  const [reviewContract, setReviewContract] = useState<Contract | null>(null);
+  const [rating, setRating] = useState(5);
+  const [reviewFeedback, setReviewFeedback] = useState("");
 
   const fetchContracts = async () => {
     try {
@@ -61,6 +88,39 @@ export default function ContractsPage() {
   useEffect(() => {
     fetchContracts();
   }, []);
+
+  // Fetch messages when chatContract opens
+  useEffect(() => {
+    if (chatContract) {
+      setMessagesLoading(true);
+      fetch(`/api/contracts/${chatContract.id}/messages`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.messages) setMessages(data.messages);
+        })
+        .finally(() => setMessagesLoading(false));
+    }
+  }, [chatContract]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatContract || !newMessage.trim()) return;
+
+    try {
+      const res = await fetch(`/api/contracts/${chatContract.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: newMessage }),
+      });
+      const data = await res.json();
+      if (data.success && data.message) {
+        setMessages((prev) => [...prev, data.message]);
+        setNewMessage("");
+      }
+    } catch (e) {
+      console.error("Failed to send message:", e);
+    }
+  };
 
   const handleMilestoneAction = async (contractId: string, milestoneId: string, action: string, extra: object = {}) => {
     setActionLoading(`${milestoneId}-${action}`);
@@ -80,6 +140,29 @@ export default function ContractsPage() {
       console.error(e);
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewContract) return;
+
+    try {
+      const res = await fetch(`/api/contracts/${reviewContract.id}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rating, feedback: reviewFeedback }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`Review submitted! Recalculated Reputation: ${data.newReputation} ★`);
+        setReviewContract(null);
+        setReviewFeedback("");
+      } else {
+        alert(data.error || "Failed to submit review");
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -106,10 +189,10 @@ export default function ContractsPage() {
       <div>
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
           <FileText className="w-6 h-6 text-indigo-400" />
-          Milestone Sequencing & Escrow Lifecycle
+          Milestone Sequencing & Contract Manager
         </h1>
         <p className="text-xs sm:text-sm text-slate-400">
-          Enforcing strict sequential milestone dependencies (FR-02, FR-12) and ACID double-entry fund disbursement.
+          Enforces strict sequential dependencies (FR-02, FR-12) and ACID double-entry fund disbursement.
         </p>
       </div>
 
@@ -136,11 +219,34 @@ export default function ContractsPage() {
                     Client: <strong className="text-slate-200">{contract.client.name}</strong> • Freelancer: <strong className="text-slate-200">{contract.freelancer.name}</strong>
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-xs text-slate-400 block">Total Contract Value</span>
-                  <span className="text-xl font-extrabold text-white font-mono">
-                    ${contract.totalAmount.toLocaleString()}
-                  </span>
+
+                <div className="flex items-center gap-3">
+                  {/* Chat button */}
+                  <button
+                    onClick={() => setChatContract(contract)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+                    Direct Messages
+                  </button>
+
+                  {/* Rate / Review button if completed */}
+                  {contract.status === "COMPLETED" && (
+                    <button
+                      onClick={() => setReviewContract(contract)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-colors"
+                    >
+                      <Star className="w-3.5 h-3.5" />
+                      Leave Review
+                    </button>
+                  )}
+
+                  <div className="text-right pl-3 border-l border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">Total Value</span>
+                    <span className="text-lg font-extrabold text-white font-mono">
+                      ${contract.totalAmount.toLocaleString()}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -258,6 +364,68 @@ export default function ContractsPage() {
         </div>
       )}
 
+      {/* Direct Messaging Drawer */}
+      {chatContract && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-lg p-6 rounded-2xl border flex flex-col h-[520px]">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-1.5">
+                  <MessageSquare className="w-4 h-4 text-indigo-400" />
+                  Direct Project Messaging
+                </h3>
+                <p className="text-[11px] text-slate-400">{chatContract.title}</p>
+              </div>
+              <button
+                onClick={() => setChatContract(null)}
+                className="text-slate-400 hover:text-white text-xs px-2 py-1 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Messages Scroll Area */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-3">
+              {messagesLoading ? (
+                <div className="text-center py-8 text-xs text-slate-400">Loading conversation...</div>
+              ) : messages.length === 0 ? (
+                <div className="text-center py-8 text-xs text-slate-500">
+                  No messages yet. Send a message to coordinate deliverable requirements!
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <div key={msg.id} className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-indigo-300">{msg.sender.name} ({msg.sender.role})</span>
+                      <span className="text-slate-500">{new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                    <p className="text-xs text-slate-200">{msg.content}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Input Bar */}
+            <form onSubmit={handleSendMessage} className="pt-3 border-t border-slate-800 flex gap-2">
+              <input
+                type="text"
+                required
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                placeholder="Type your message..."
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Deliverable Submission Modal */}
       {submitMilestone && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -320,6 +488,70 @@ export default function ContractsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review Modal */}
+      {reviewContract && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel w-full max-w-md p-6 rounded-2xl border space-y-4">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Star className="w-5 h-5 text-amber-400" />
+              Contract Performance Rating
+            </h2>
+            <p className="text-xs text-slate-300">
+              Contract: <strong className="text-white">{reviewContract.title}</strong>
+            </p>
+
+            <form onSubmit={handleSubmitReview} className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-2">Rating (1 to 5 Stars)</label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setRating(s)}
+                      className={`p-2 rounded-xl border text-sm font-bold flex items-center justify-center flex-1 transition-colors ${
+                        rating >= s
+                          ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+                          : "bg-slate-900 border-slate-800 text-slate-500"
+                      }`}
+                    >
+                      {s} ★
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-300 block mb-1">Feedback & Notes</label>
+                <textarea
+                  rows={3}
+                  value={reviewFeedback}
+                  onChange={(e) => setReviewFeedback(e.target.value)}
+                  placeholder="Share feedback on technical quality, communication, and adherence to milestones..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReviewContract(null)}
+                  className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs"
+                >
+                  Submit Official Rating
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

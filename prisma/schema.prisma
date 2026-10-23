@@ -82,25 +82,28 @@ enum EntryType {
 // Engine 04: Role-Based Identity & User Accounts (Owner: Vaibhav Chavanpatil)
 // -----------------------------------------------------------------------------
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  passwordHash  String
-  name          String
-  role          Role      @default(CLIENT)
-  avatarUrl     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                  String         @id @default(cuid())
+  email               String         @unique
+  passwordHash        String
+  name                String
+  role                Role           @default(CLIENT)
+  avatarUrl           String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  profile       Profile?
-  postedJobs    Job[]             @relation("ClientJobs")
-  proposals     Proposal[]        @relation("FreelancerProposals")
-  clientContracts Contract[]      @relation("ClientContracts")
-  freelancerContracts Contract[]  @relation("FreelancerContracts")
-  arbitratedDisputes Dispute[]    @relation("ArbiterDisputes")
-  initiatedDisputes Dispute[]     @relation("InitiatorDisputes")
+  profile             Profile?
+  postedJobs          Job[]          @relation("ClientJobs")
+  proposals           Proposal[]     @relation("FreelancerProposals")
+  clientContracts     Contract[]     @relation("ClientContracts")
+  freelancerContracts Contract[]     @relation("FreelancerContracts")
+  arbitratedDisputes  Dispute[]      @relation("ArbiterDisputes")
+  initiatedDisputes   Dispute[]      @relation("InitiatorDisputes")
   evidenceSubmissions EvidenceNode[] @relation("UserEvidence")
-  ledgerAccounts LedgerAccount[]
-  auditEvents   AuditLog[]        @relation("UserAuditLogs")
+  ledgerAccounts      LedgerAccount[]
+  auditEvents         AuditLog[]     @relation("UserAuditLogs")
+  sentMessages        Message[]      @relation("SentMessages")
+  givenReviews        Review[]       @relation("GivenReviews")
+  receivedReviews     Review[]       @relation("ReceivedReviews")
 
   @@map("users")
 }
@@ -182,6 +185,8 @@ model Contract {
   milestones     Milestone[]
   disputes       Dispute[]
   ledgerAccounts LedgerAccount[]
+  messages       Message[]
+  reviews        Review[]
 
   @@map("contracts")
 }
@@ -196,6 +201,7 @@ model Milestone {
   status           MilestoneStatus @default(LOCKED)
   deliverableUrl   String?
   deliverableHash  String?         // Streaming SHA-256 Checksum
+  revisionNotes    String?
   submittedAt      DateTime?
   reviewDeadline   DateTime?       // 7-Calendar-Day Watchdog Timer
   approvedAt       DateTime?
@@ -206,6 +212,41 @@ model Milestone {
   ledgerAccounts   LedgerAccount[]
 
   @@map("milestones")
+}
+
+// -----------------------------------------------------------------------------
+// Direct Project Messaging
+// -----------------------------------------------------------------------------
+model Message {
+  id         String   @id @default(cuid())
+  contractId String
+  senderId   String
+  content    String
+  createdAt  DateTime @default(now())
+
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+// -----------------------------------------------------------------------------
+// Mutual Post-Contract Reviews & Ratings
+// -----------------------------------------------------------------------------
+model Review {
+  id          String   @id @default(cuid())
+  contractId  String
+  reviewerId  String
+  revieweeId  String
+  rating      Int      @default(5) // 1 to 5 stars
+  feedback    String
+  createdAt   DateTime @default(now())
+
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  reviewer    User     @relation("GivenReviews", fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewee    User     @relation("ReceivedReviews", fields: [revieweeId], references: [id], onDelete: Cascade)
+
+  @@map("reviews")
 }
 
 // -----------------------------------------------------------------------------
