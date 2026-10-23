@@ -1,0 +1,320 @@
+// GigaFlow — Milestone-Based Escrow & Evidence-Based Dispute Resolution Marketplace
+// Academic Context: KLE Tech Team 07 (Theme 01)
+// Architecture: 4 Core Academic Engines (OS, DSA/SE, DBMS, Web/Security)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  CLIENT
+  FREELANCER
+  ARBITER
+  ADMIN
+}
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum ContractStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  DISPUTED
+  TERMINATED
+}
+
+enum MilestoneStatus {
+  LOCKED
+  FUNDED
+  IN_DEVELOPMENT
+  SUBMITTED
+  APPROVED
+  DISPUTED
+  REFUNDED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CANCELLED
+}
+
+enum AccountType {
+  USER_AVAILABLE
+  ESCROW_HOLD
+  PLATFORM_REVENUE
+  SYSTEM_RESERVE
+}
+
+enum TransactionType {
+  DEPOSIT
+  ESCROW_LOCK
+  ESCROW_RELEASE
+  DISPUTE_SPLIT
+  REFUND
+}
+
+enum EntryType {
+  DEBIT
+  CREDIT
+}
+
+// -----------------------------------------------------------------------------
+// Engine 04: Role-Based Identity & User Accounts (Owner: Vaibhav Chavanpatil)
+// -----------------------------------------------------------------------------
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  role          Role      @default(CLIENT)
+  avatarUrl     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  profile       Profile?
+  postedJobs    Job[]             @relation("ClientJobs")
+  proposals     Proposal[]        @relation("FreelancerProposals")
+  clientContracts Contract[]      @relation("ClientContracts")
+  freelancerContracts Contract[]  @relation("FreelancerContracts")
+  arbitratedDisputes Dispute[]    @relation("ArbiterDisputes")
+  initiatedDisputes Dispute[]     @relation("InitiatorDisputes")
+  evidenceSubmissions EvidenceNode[] @relation("UserEvidence")
+  ledgerAccounts LedgerAccount[]
+  auditEvents   AuditLog[]        @relation("UserAuditLogs")
+
+  @@map("users")
+}
+
+model Profile {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  bio                String?
+  headline           String?
+  skills             String[] @default([])
+  hourlyRate         Float?   @default(0.0)
+  reputationScore    Float    @default(5.0)
+  completedJobsCount Int      @default(0)
+  walletBalance      Float    @default(10000.0) // Simulated starting demo funds
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+// -----------------------------------------------------------------------------
+// Engine 01 & 02: Marketplace, Bidding & Heuristic Match (Vaishnavi & Darshan)
+// -----------------------------------------------------------------------------
+model Job {
+  id             String     @id @default(cuid())
+  clientId       String
+  title          String
+  description    String
+  category       String
+  budget         Float
+  currency       String     @default("USD")
+  status         JobStatus  @default(OPEN)
+  requiredSkills String[]   @default([])
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  client         User       @relation("ClientJobs", fields: [clientId], references: [id], onDelete: Cascade)
+  proposals      Proposal[]
+  contract       Contract?
+
+  @@map("jobs")
+}
+
+model Proposal {
+  id             String         @id @default(cuid())
+  jobId          String
+  freelancerId   String
+  bidAmount      Float
+  deliveryDays   Int
+  coverLetter    String
+  heuristicScore Float          @default(0.0) // Matcher Jaccard + Budget + Reputation
+  status         ProposalStatus @default(PENDING)
+  createdAt      DateTime       @default(now())
+
+  job            Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  freelancer     User           @relation("FreelancerProposals", fields: [freelancerId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, freelancerId])
+  @@map("proposals")
+}
+
+// -----------------------------------------------------------------------------
+// Engine 01: Contract Lifecycle & Milestone FSM (Owner: Vaishnavi Modekar)
+// -----------------------------------------------------------------------------
+model Contract {
+  id             String         @id @default(cuid())
+  jobId          String         @unique
+  clientId       String
+  freelancerId   String
+  title          String
+  totalAmount    Float
+  status         ContractStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  job            Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  client         User           @relation("ClientContracts", fields: [clientId], references: [id], onDelete: Cascade)
+  freelancer     User           @relation("FreelancerContracts", fields: [freelancerId], references: [id], onDelete: Cascade)
+  milestones     Milestone[]
+  disputes       Dispute[]
+  ledgerAccounts LedgerAccount[]
+
+  @@map("contracts")
+}
+
+model Milestone {
+  id               String          @id @default(cuid())
+  contractId       String
+  sequenceIndex    Int             @default(1)
+  title            String
+  description      String
+  amount           Float
+  status           MilestoneStatus @default(LOCKED)
+  deliverableUrl   String?
+  deliverableHash  String?         // Streaming SHA-256 Checksum
+  submittedAt      DateTime?
+  reviewDeadline   DateTime?       // 7-Calendar-Day Watchdog Timer
+  approvedAt       DateTime?
+  createdAt        DateTime        @default(now())
+
+  contract         Contract        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  disputes         Dispute[]
+  ledgerAccounts   LedgerAccount[]
+
+  @@map("milestones")
+}
+
+// -----------------------------------------------------------------------------
+// Engine 02: Verification & Merkle Evidence Tree (Owner: Darshan Kittur)
+// -----------------------------------------------------------------------------
+model Dispute {
+  id                     String        @id @default(cuid())
+  contractId             String
+  milestoneId            String
+  initiatorId            String
+  arbiterId              String?
+  reason                 String
+  status                 DisputeStatus @default(OPEN)
+  clientClaimRatio       Float         @default(1.0)
+  freelancerClaimRatio   Float         @default(0.0)
+  rulingSummary          String?
+  rulingRatioClient      Float?
+  rulingRatioFreelancer  Float?
+  evidenceRootHash       String?       // Merkle Root SHA-256
+  resolvedAt             DateTime?
+  createdAt              DateTime      @default(now())
+
+  contract               Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  milestone              Milestone     @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  initiator              User          @relation("InitiatorDisputes", fields: [initiatorId], references: [id])
+  arbiter                User?         @relation("ArbiterDisputes", fields: [arbiterId], references: [id])
+  evidenceNodes          EvidenceNode[]
+
+  @@map("disputes")
+}
+
+model EvidenceNode {
+  id             String    @id @default(cuid())
+  disputeId      String
+  uploaderId     String
+  artifactName   String
+  artifactType   String    // CODE, SPEC, CHAT, SCREENSHOT, GIT_COMMIT
+  payloadHash    String    // SHA-256 digest of binary/content
+  parentHash     String?
+  merkleIndex    Int       @default(0)
+  createdAt      DateTime  @default(now())
+
+  dispute        Dispute   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  uploader       User      @relation("UserEvidence", fields: [uploaderId], references: [id])
+
+  @@map("evidence_nodes")
+}
+
+// -----------------------------------------------------------------------------
+// Engine 03: Double-Entry ACID Escrow Ledger & Audit (Owner: Purvi Sammatshetti)
+// -----------------------------------------------------------------------------
+model LedgerAccount {
+  id             String        @id @default(cuid())
+  accountType    AccountType
+  userId         String?
+  contractId     String?
+  milestoneId    String?
+  currency       String        @default("USD")
+  createdAt      DateTime      @default(now())
+
+  user           User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contract       Contract?     @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  milestone      Milestone?    @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  entries        LedgerEntry[]
+
+  @@unique([accountType, userId, contractId, milestoneId])
+  @@map("ledger_accounts")
+}
+
+model LedgerTransaction {
+  id              String          @id @default(cuid())
+  txType          TransactionType
+  referenceId     String          // ID of Milestone, Dispute, or Contract
+  idempotencyKey  String          @unique
+  description     String
+  createdAt       DateTime        @default(now())
+
+  entries         LedgerEntry[]
+
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id             String            @id @default(cuid())
+  transactionId  String
+  accountId      String
+  entryType      EntryType
+  amount         Float             // Must always be positive; direction determined by DEBIT/CREDIT
+  createdAt      DateTime          @default(now())
+
+  transaction    LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account        LedgerAccount     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("ledger_entries")
+}
+
+model AuditLog {
+  id             String    @id @default(cuid())
+  actorId        String?
+  actorRole      String?
+  action         String
+  resourceType   String
+  resourceId     String
+  payloadJson    String?
+  previousHash   String    // Hash-Chained Security: Hash_n = SHA256(Payload_n + Hash_{n-1})
+  currentHash    String
+  createdAt      DateTime  @default(now())
+
+  actor          User?     @relation("UserAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
